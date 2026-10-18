@@ -32,7 +32,8 @@ export default function AsciiPortrait() {
     const initAnimation = () => {
       if (isCancelled) return;
 
-      const rect = container.getBoundingClientRect();
+      try {
+        const rect = container.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
       const fallbackW = window.innerWidth >= 1024 ? 380 : window.innerWidth >= 768 ? 270 : window.innerWidth >= 640 ? 240 : 190;
@@ -73,8 +74,6 @@ export default function AsciiPortrait() {
       const imgData = offCtx.getImageData(0, 0, sampleCols, sampleRows).data;
 
       const particles = [];
-      const centerX = padX + portraitW / 2;
-      const centerY = padY + portraitH / 2;
 
       for (let r = 0; r < sampleRows; r++) {
         for (let c = 0; c < sampleCols; c++) {
@@ -88,65 +87,61 @@ export default function AsciiPortrait() {
             const targetX = padX + (c / sampleCols) * portraitW;
             const targetY = padY + (r / sampleRows) * portraitH;
 
-            // Deterministic pseudo-random seed based strictly on (r, c)
-            // Guarantees 100% reproducible, perfectly balanced particle distribution on every load
-            const raw = Math.sin(r * 12.9898 + c * 78.233) * 43758.5453;
-            const pseudo = raw - Math.floor(raw);
+            // Deterministic pseudo-random seeds based strictly on (r, c)
+            // Ensures 100% reproducible, consistent layout between visits and reloads
+            const raw1 = Math.sin(r * 12.9898 + c * 78.233) * 43758.5453;
+            const pseudo1 = raw1 - Math.floor(raw1);
 
-            // Symmetrical 360-degree radial convergence from outer field
-            const dx = targetX - centerX;
-            const dy = targetY - centerY;
-            const distFromCenter = Math.hypot(dx, dy);
-            const baseAngle = distFromCenter > 5 ? Math.atan2(dy, dx) : (pseudo * Math.PI * 2);
-            const spreadAngle = baseAngle + (pseudo - 0.5) * 0.7;
+            const raw2 = Math.sin(c * 39.346 + r * 11.135) * 43758.5453;
+            const pseudo2 = raw2 - Math.floor(raw2);
 
-            // Centered spawn radius: closer to the portrait instead of far outer bounds
-            const offsetDist = portraitW * (0.22 + pseudo * 0.26);
-            const startX = targetX + Math.cos(spreadAngle) * offsetDist;
-            const startY = targetY + Math.sin(spreadAngle) * offsetDist;
+            const raw3 = Math.sin((r + c) * 23.451) * 43758.5453;
+            const pseudo3 = raw3 - Math.floor(raw3);
 
-            // Organic curved / swerving trajectory parameters
-            const pathDx = targetX - startX;
-            const pathDy = targetY - startY;
-            const pathDist = Math.hypot(pathDx, pathDy) || 1;
-            const perpX = -pathDy / pathDist;
-            const perpY = pathDx / pathDist;
-            const curveAmp = (pseudo - 0.5) * Math.min(pathDist * 0.45, portraitW * 0.16);
+            // Isotropic 360-degree dispersion around each particle's own target (matching Gazi Jarin's recording)
+            // Wider scatter distance for a more expansive, dramatic gathering
+            const scatterAngle = pseudo1 * Math.PI * 2;
+            const scatterDist = portraitW * (0.20 + pseudo2 * 0.38);
+
+            const startX = targetX + Math.cos(scatterAngle) * scatterDist;
+            const startY = targetY + Math.sin(scatterAngle) * scatterDist;
 
             const brightness = (red + green + blue) / (3 * 255);
             const radius = 1.0 + brightness * 1.4;
 
-            // Gently slowed down by a tiny amount for smoother, graceful arrival
-            const delay = pseudo * 200;
-            const duration = 800 + (1 - pseudo) * 200;
+            // Staggered activation delay (up to 120ms)
+            const delay = pseudo3 * 120;
 
             particles.push({
+              x: startX,
+              y: startY,
               targetX,
               targetY,
-              startX,
-              startY,
-              perpX,
-              perpY,
-              curveAmp,
+              vx: 0,
+              vy: 0,
               color: `rgba(${red}, ${green}, ${blue}, ${Math.min(alpha, 0.95)})`,
               radius,
               delay,
-              duration,
             });
           }
         }
       }
 
       let startTime = null;
+      let lastTime = null;
       let imageFadeStarted = false;
       let canvasFadeStarted = false;
 
-      const easeOutQuart = (x) => 1 - Math.pow(1 - x, 4);
-
       const render = (timestamp) => {
         if (isCancelled) return;
-        if (!startTime) startTime = timestamp;
+        if (!startTime) {
+          startTime = timestamp;
+          lastTime = timestamp;
+        }
         const elapsed = timestamp - startTime;
+        // Frame delta normalized to 60fps (16.67ms) to maintain smooth, consistent speed across 60Hz/120Hz displays
+        const dt = Math.min((timestamp - lastTime) / 16.67, 2) || 1;
+        lastTime = timestamp;
 
         ctx.clearRect(0, 0, canvasW, canvasH);
 
@@ -156,36 +151,65 @@ export default function AsciiPortrait() {
 
           if (particleElapsed <= 0) continue;
 
-          const t = Math.min(particleElapsed / p.duration, 1);
-          const ease = easeOutQuart(t);
+          // Pure spring physics simulation (identical to Gazi Jarin's engine)
+          // Starts gentle, accelerates with natural inertia, and softly settles
+          const moveProgress = Math.min(particleElapsed / 950, 1);
+          const easedMove = 1 - Math.pow(1 - moveProgress, 3);
 
-          // Organic curved trajectory (gives natural floating/swirling feel without straight line motion)
-          const wave = Math.sin(ease * Math.PI) * (1 + 0.22 * Math.sin(ease * Math.PI * 2));
-          const currentX = p.startX + (p.targetX - p.startX) * ease + p.perpX * p.curveAmp * wave;
-          const currentY = p.startY + (p.targetY - p.startY) * ease + p.perpY * p.curveAmp * wave;
-          const currentAlpha = Math.min(t * 3.5, 1);
+          const dx = p.targetX - p.x;
+          const dy = p.targetY - p.y;
+
+          // Continuous organic acceleration
+          const pullStrength = (0.015 + easedMove * 0.075) * dt;
+          p.vx += dx * pullStrength;
+          p.vy += dy * pullStrength;
+
+          // Subtle organic breath / turbulence while in flight
+          if (moveProgress < 0.96) {
+            const breathX = Math.sin((elapsed / 1000) * 2 + p.targetY * 0.08) * 0.25 * dt;
+            const breathY = Math.cos((elapsed / 1000) * 2 + p.targetX * 0.08) * 0.25 * dt;
+            p.vx += breathX;
+            p.vy += breathY;
+            p.vx *= Math.pow(0.91, dt);
+            p.vy *= Math.pow(0.91, dt);
+          } else {
+            // Settle cleanly into target
+            p.vx *= Math.pow(0.80, dt);
+            p.vy *= Math.pow(0.80, dt);
+            if (Math.abs(dx) < 0.25 && Math.abs(dy) < 0.25) {
+              p.x = p.targetX;
+              p.y = p.targetY;
+              p.vx = 0;
+              p.vy = 0;
+            }
+          }
+
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+
+          const currentAlpha = Math.min(particleElapsed / 180, 1);
 
           ctx.fillStyle = p.color;
           ctx.globalAlpha = currentAlpha;
           ctx.beginPath();
-          ctx.arc(currentX, currentY, p.radius, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
           ctx.fill();
         }
 
-        // STEP 1: While atoms are converging into position, begin crossfading the real picture IN
-        if (elapsed > 600 && !imageFadeStarted) {
+        // STEP 1: While atoms are converging into position (~750ms), begin crossfading real picture IN
+        if (elapsed > 750 && !imageFadeStarted) {
           imageFadeStarted = true;
           setImageOpacity(1);
         }
 
-        // STEP 2: Once atoms have reached their target and the image is visible, gently fade canvas OUT
-        if (elapsed > 980 && !canvasFadeStarted) {
+        // STEP 2: Once atoms have reached their target (~1150ms), gently fade canvas OUT
+        if (elapsed > 1150 && !canvasFadeStarted) {
           canvasFadeStarted = true;
           setCanvasOpacity(0);
         }
 
         // STEP 3: Animation complete, cleanly unmount canvas
-        if (elapsed > 1550) {
+        if (elapsed > 1650) {
           setShowCanvas(false);
           return;
         }
@@ -194,6 +218,11 @@ export default function AsciiPortrait() {
       };
 
       animFrameId = requestAnimationFrame(render);
+    } catch (err) {
+      console.error("Portrait animation error:", err);
+      setImageOpacity(1);
+      setShowCanvas(false);
+    }
     };
 
     if (img.complete) {
@@ -202,8 +231,13 @@ export default function AsciiPortrait() {
       img.onload = initAnimation;
     }
 
+    const safetyTimer = setTimeout(() => {
+      setImageOpacity(1);
+    }, 2200);
+
     return () => {
       isCancelled = true;
+      clearTimeout(safetyTimer);
       if (animFrameId) cancelAnimationFrame(animFrameId);
     };
   }, []);
