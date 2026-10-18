@@ -35,8 +35,9 @@ export default function AsciiPortrait() {
       const rect = container.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-      const portraitW = rect.width || 350;
-      const portraitH = rect.height || portraitW * 1.5;
+      const fallbackW = window.innerWidth >= 1024 ? 380 : window.innerWidth >= 768 ? 270 : window.innerWidth >= 640 ? 240 : 190;
+      const portraitW = rect.width > 0 ? rect.width : fallbackW;
+      const portraitH = rect.height > 0 ? rect.height : Math.round(portraitW * 1.5);
 
       // Dynamically scale canvas margins based on portrait dimensions,
       // safely bounded to available viewport width on mobile to prevent iOS horizontal overscroll
@@ -72,6 +73,8 @@ export default function AsciiPortrait() {
       const imgData = offCtx.getImageData(0, 0, sampleCols, sampleRows).data;
 
       const particles = [];
+      const centerX = padX + portraitW / 2;
+      const centerY = padY + portraitH / 2;
 
       for (let r = 0; r < sampleRows; r++) {
         for (let c = 0; c < sampleCols; c++) {
@@ -85,29 +88,26 @@ export default function AsciiPortrait() {
             const targetX = padX + (c / sampleCols) * portraitW;
             const targetY = padY + (r / sampleRows) * portraitH;
 
-            // Randomized spawn positions from wide surrounding field
-            const zone = Math.floor(Math.random() * 4);
-            let startX, startY;
+            // Deterministic pseudo-random seed based strictly on (r, c)
+            // Guarantees 100% reproducible, perfectly balanced particle distribution on every load
+            const raw = Math.sin(r * 12.9898 + c * 78.233) * 43758.5453;
+            const pseudo = raw - Math.floor(raw);
 
-            if (zone === 0) {
-              startX = Math.random() * padX;
-              startY = Math.random() * canvasH;
-            } else if (zone === 1) {
-              startX = padX + portraitW + Math.random() * padX;
-              startY = Math.random() * canvasH;
-            } else if (zone === 2) {
-              startX = Math.random() * canvasW;
-              startY = Math.random() * padY;
-            } else {
-              startX = Math.random() * canvasW;
-              startY = padY + portraitH + Math.random() * padY;
-            }
+            // Symmetrical 360-degree radial convergence from outer field
+            const dx = targetX - centerX;
+            const dy = targetY - centerY;
+            const angle = Math.atan2(dy, dx);
+            const spreadAngle = angle + (pseudo - 0.5) * 0.45;
+            const spawnDist = Math.max(portraitW, portraitH) * (0.68 + pseudo * 0.42);
+
+            const startX = centerX + Math.cos(spreadAngle) * spawnDist;
+            const startY = centerY + Math.sin(spreadAngle) * spawnDist;
 
             const brightness = (red + green + blue) / (3 * 255);
             const radius = 1.0 + brightness * 1.4;
 
-            const delay = Math.random() * 150;
-            const duration = 600 + Math.random() * 200;
+            const delay = pseudo * 160;
+            const duration = 650 + (1 - pseudo) * 150;
 
             particles.push({
               targetX,
