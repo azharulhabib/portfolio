@@ -96,24 +96,38 @@ export default function AsciiPortrait() {
             // Symmetrical 360-degree radial convergence from outer field
             const dx = targetX - centerX;
             const dy = targetY - centerY;
-            const angle = Math.atan2(dy, dx);
-            const spreadAngle = angle + (pseudo - 0.5) * 0.45;
-            const spawnDist = Math.max(portraitW, portraitH) * (0.68 + pseudo * 0.42);
+            const distFromCenter = Math.hypot(dx, dy);
+            const baseAngle = distFromCenter > 5 ? Math.atan2(dy, dx) : (pseudo * Math.PI * 2);
+            const spreadAngle = baseAngle + (pseudo - 0.5) * 0.7;
 
-            const startX = centerX + Math.cos(spreadAngle) * spawnDist;
-            const startY = centerY + Math.sin(spreadAngle) * spawnDist;
+            // Centered spawn radius: closer to the portrait instead of far outer bounds
+            const offsetDist = portraitW * (0.22 + pseudo * 0.26);
+            const startX = targetX + Math.cos(spreadAngle) * offsetDist;
+            const startY = targetY + Math.sin(spreadAngle) * offsetDist;
+
+            // Organic curved / swerving trajectory parameters
+            const pathDx = targetX - startX;
+            const pathDy = targetY - startY;
+            const pathDist = Math.hypot(pathDx, pathDy) || 1;
+            const perpX = -pathDy / pathDist;
+            const perpY = pathDx / pathDist;
+            const curveAmp = (pseudo - 0.5) * Math.min(pathDist * 0.45, portraitW * 0.16);
 
             const brightness = (red + green + blue) / (3 * 255);
             const radius = 1.0 + brightness * 1.4;
 
-            const delay = pseudo * 160;
-            const duration = 650 + (1 - pseudo) * 150;
+            // Gently slowed down by a tiny amount for smoother, graceful arrival
+            const delay = pseudo * 200;
+            const duration = 800 + (1 - pseudo) * 200;
 
             particles.push({
               targetX,
               targetY,
               startX,
               startY,
+              perpX,
+              perpY,
+              curveAmp,
               color: `rgba(${red}, ${green}, ${blue}, ${Math.min(alpha, 0.95)})`,
               radius,
               delay,
@@ -145,8 +159,10 @@ export default function AsciiPortrait() {
           const t = Math.min(particleElapsed / p.duration, 1);
           const ease = easeOutQuart(t);
 
-          const currentX = p.startX + (p.targetX - p.startX) * ease;
-          const currentY = p.startY + (p.targetY - p.startY) * ease;
+          // Organic curved trajectory (gives natural floating/swirling feel without straight line motion)
+          const wave = Math.sin(ease * Math.PI) * (1 + 0.22 * Math.sin(ease * Math.PI * 2));
+          const currentX = p.startX + (p.targetX - p.startX) * ease + p.perpX * p.curveAmp * wave;
+          const currentY = p.startY + (p.targetY - p.startY) * ease + p.perpY * p.curveAmp * wave;
           const currentAlpha = Math.min(t * 3.5, 1);
 
           ctx.fillStyle = p.color;
@@ -157,19 +173,19 @@ export default function AsciiPortrait() {
         }
 
         // STEP 1: While atoms are converging into position, begin crossfading the real picture IN
-        if (elapsed > 450 && !imageFadeStarted) {
+        if (elapsed > 600 && !imageFadeStarted) {
           imageFadeStarted = true;
           setImageOpacity(1);
         }
 
         // STEP 2: Once atoms have reached their target and the image is visible, gently fade canvas OUT
-        if (elapsed > 780 && !canvasFadeStarted) {
+        if (elapsed > 980 && !canvasFadeStarted) {
           canvasFadeStarted = true;
           setCanvasOpacity(0);
         }
 
         // STEP 3: Animation complete, cleanly unmount canvas
-        if (elapsed > 1300) {
+        if (elapsed > 1550) {
           setShowCanvas(false);
           return;
         }
